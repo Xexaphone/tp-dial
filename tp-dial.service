@@ -1,0 +1,18 @@
+# Starts tp-dial with the graphical session (uwsm). Lives outside ~/.config/hypr,
+# so `omarchy refresh hyprland` can't remove it. Installed by install.sh.
+[Unit]
+Description=tp-dial TrackPoint radial launcher
+PartOf=graphical-session.target
+After=graphical-session.target
+Requisite=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/tp-dial
+# Restart after a crash; choosing "Quit" on the dial exits cleanly and stays quit.
+Restart=on-failure
+RestartSec=2
+SyslogIdentifier=tp-dial
+Slice=app-graphical.slice
+
+[Install]
+WantedBy=graphical-session.target

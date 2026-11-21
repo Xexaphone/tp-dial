@@ -1,0 +1,22 @@
+[package]
+name = "tp-dial"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-channel = "2.5.0"
+evdev = "0.13.2"
+gtk4 = { version = "0.11.5", features = ["v4_12"] }
+gtk4-layer-shell = "0.8.1"
+libc = "0.2.191"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.2.1"
+toml_edit = "0.25.19"
+
+[profile.release]
+# A panic anywhere must kill the process so the kernel releases the TrackPoint grab.
+panic = "abort"
+
+[profile.dev]
+panic = "abort"

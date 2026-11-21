@@ -1,0 +1,4 @@
+# tp-dial: give the logged-in seat user (not a group) access to pointing sticks and uinput.
+# Must sort before 73-seat-late.rules for uaccess to apply.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_POINTINGSTICK}=="1", TAG+="uaccess"
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
