@@ -4,7 +4,10 @@ use std::time::{Duration, SystemTime};
 
 use crate::gesture::Params;
 
-pub const DEFAULT_CONFIG: &str = r##"# tp-dial config. Re-read automatically the next time you touch the TrackPoint.
+/// Settings part of the default config; items are appended per platform.
+macro_rules! settings_text {
+    () => {
+        r##"# tp-dial config. Re-read automatically the next time you touch the TrackPoint.
 #
 # mode = "any":   any real TrackPoint push opens the dial instantly. The TrackPoint
 #                 no longer moves the cursor (use the touchpad); its buttons still
@@ -30,13 +33,13 @@ size = 340           # diameter in logical px
 min_steer = 12       # push strength that changes the highlighted item (weaker = keep it)
 release_ms = 90      # no motion this long = you let go
 restore_cursor = true # put the cursor back where the flick started
-# Colours: "theme" follows your current Omarchy theme (re-read every time the dial
-# opens, so `omarchy theme set` applies instantly), or give a hex colour.
+# Colours: "theme" follows your desktop's colours (Omarchy theme on Omarchy, accent
+# and light/dark mode on Windows; re-read every time the dial opens), or a hex colour.
 # Add an alpha byte (e.g. "#16161ee6") for see-through.
 accent = "theme"
 background = "theme"
 foreground = "theme"
-font = "monospace"   # "monospace" = your Omarchy font (`omarchy font set`)
+font = "default"     # "default" = your monospace font on Linux (Omarchy's font there), Segoe UI on Windows
 font_size = 15       # largest label size; long labels shrink, then get "…", to fit their slice
 
 selected_text = "theme"   # label colour on the highlighted slice
@@ -53,16 +56,42 @@ animation = "pop"         # how the dial appears: "none", "fade", "pop", "spin" 
 animation_ms = 140
 
 # Items go clockwise starting at the top. Each needs a `label` and exactly one of:
-#   app     = "firefox"            launched via `uwsm-app -- <app>` (a .desktop id works too)
-#   script  = "~/bin/thing.sh"     executable file, run directly
-#   command = "notify-send hi"     any shell command line
+#   app     = "firefox"            an app: a command or .desktop id on Linux (started with
+#                                  uwsm-app / gtk-launch when available); on Windows a program
+#                                  name, path, or URI like "ms-settings:" (run with `start`)
+#   script  = "~/bin/thing.sh"     executable file, run directly (.ps1/.bat/.cmd on Windows)
+#   command = "notify-send hi"     any shell command line (sh on Linux, cmd on Windows)
 #   action  = "add-item"           built-in: open a form that adds an item to this file
 #   action  = "settings"           built-in: open the appearance / trigger settings window
 #   action  = "close"              built-in: just close the dial
 #   action  = "quit"               built-in: exit tp-dial (gives the TrackPoint back to the cursor)
 # Items added from the dial's form are inserted before the first built-in item.
 
+"##
+    };
+}
+
+macro_rules! builtin_items {
+    () => {
+        r##"[[item]]
+label = "Settings"
+action = "settings"
+
 [[item]]
+label = "+ Add item"
+action = "add-item"
+
+[[item]]
+label = "Close"
+action = "close"
+"##
+    };
+}
+
+/// Omarchy: its launchers and menus.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const OMARCHY_ITEMS: &str = concat!(
+    r##"[[item]]
 label = "Terminal"
 app = "xdg-terminal-exec"
 
@@ -82,18 +111,61 @@ command = "omarchy-capture-screenshot"
 label = "Menu"
 command = "omarchy-menu"
 
-[[item]]
-label = "Settings"
-action = "settings"
+"##,
+    builtin_items!()
+);
+
+/// Any other Linux desktop: freedesktop defaults.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const LINUX_ITEMS: &str = concat!(
+    r##"[[item]]
+label = "Terminal"
+command = "for t in xdg-terminal-exec x-terminal-emulator foot kitty alacritty wezterm ghostty konsole gnome-terminal; do command -v $t >/dev/null && exec $t; done"
 
 [[item]]
-label = "+ Add item"
-action = "add-item"
+label = "Browser"
+command = "b=$(xdg-settings get default-web-browser 2>/dev/null) && [ -n \"$b\" ] && exec gtk-launch \"$b\"; exec xdg-open https://"
 
 [[item]]
-label = "Close"
-action = "close"
-"##;
+label = "Files"
+command = "xdg-open \"$HOME\""
+
+"##,
+    builtin_items!()
+);
+
+/// Windows 11.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const WINDOWS_ITEMS: &str = concat!(
+    r##"[[item]]
+label = "Terminal"
+app = "wt"
+
+[[item]]
+label = "Files"
+app = "explorer"
+
+[[item]]
+label = "Snip"
+app = "ms-screenclip:"
+
+[[item]]
+label = "Task Manager"
+app = "taskmgr"
+
+"##,
+    builtin_items!()
+);
+
+/// The default config for the platform this is running on.
+pub fn default_config() -> String {
+    format!("{}{}", settings_text!(), crate::platform::default_items())
+}
+
+/// Fixed default (Omarchy flavour) so tests don't depend on the machine.
+#[cfg(test)]
+pub const DEFAULT_CONFIG: &str = concat!(settings_text!(), "[[item]]\nlabel = \"Terminal\"\napp = \"xdg-terminal-exec\"\n\n[[item]]\nlabel = \"Browser\"\ncommand = \"omarchy-launch-browser\"\n\n[[item]]\nlabel = \"Files\"\napp = \"nautilus --new-window\"\n\n[[item]]\nlabel = \"Screenshot\"\ncommand = \"omarchy-capture-screenshot\"\n\n[[item]]\nlabel = \"Menu\"\ncommand = \"omarchy-menu\"\n\n", builtin_items!());
+
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
@@ -129,6 +201,11 @@ fn default_window_opacity() -> f64 {
 pub struct Trigger {
     #[serde(default = "default_mode")]
     pub mode: TriggerMode,
+    /// Which pointing device is the TrackPoint, if auto-detection picks the wrong
+    /// one: Linux /dev/input/eventN or part of its name; Windows part of its
+    /// device path (`tp-dial --find-device` fills this in).
+    #[serde(default)]
+    pub device: String,
     #[serde(default = "default_min_push")]
     pub min_push: f64,
     pub trigger_speed: f64,
@@ -244,7 +321,7 @@ fn default_mode() -> TriggerMode {
 }
 
 fn default_font() -> String {
-    "monospace".into()
+    "default".into()
 }
 
 fn default_min_steer() -> f64 {
@@ -283,15 +360,30 @@ pub struct Item {
 }
 
 pub enum Launch {
+    /// A shell command line (sh on Linux, cmd on Windows).
     Shell(String),
+    /// An executable / script file.
     Exec(PathBuf),
+    /// An app; each platform decides how to start it (uwsm-app, gtk-launch, `start`).
+    App(String),
     Builtin(Builtin),
+}
+
+impl std::fmt::Display for Launch {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Launch::Shell(s) => write!(f, "{s}"),
+            Launch::Exec(p) => write!(f, "{}", p.display()),
+            Launch::App(a) => write!(f, "app: {a}"),
+            Launch::Builtin(b) => write!(f, "built-in: {b:?}"),
+        }
+    }
 }
 
 impl Item {
     pub fn launch(&self) -> Launch {
         match (&self.app, &self.script, &self.command, self.action) {
-            (Some(a), ..) => Launch::Shell(format!("uwsm-app -- {a}")),
+            (Some(a), ..) => Launch::App(a.clone()),
             (_, Some(s), ..) => Launch::Exec(expand_tilde(s)),
             (_, _, Some(c), _) => Launch::Shell(c.clone()),
             (.., Some(b)) => Launch::Builtin(b),
@@ -302,10 +394,14 @@ impl Item {
 
 impl Config {
     pub fn path() -> PathBuf {
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home().join(".config"));
-        base.join("tp-dial/config.toml")
+        let base = if cfg!(windows) {
+            std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(home)
+        } else {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home().join(".config"))
+        };
+        base.join("tp-dial").join("config.toml")
     }
 
     /// Load, writing the default file first if none exists.
@@ -313,7 +409,7 @@ impl Config {
         let path = Self::path();
         if !path.exists() {
             std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-            std::fs::write(&path, DEFAULT_CONFIG).map_err(|e| e.to_string())?;
+            std::fs::write(&path, default_config()).map_err(|e| e.to_string())?;
             eprintln!("wrote default config to {}", path.display());
         }
         let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -410,18 +506,12 @@ pub fn add_item_to_file(kind: Kind, label: &str, value: &str) -> Result<(), Stri
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-/// Where `omarchy theme set` puts the active theme's palette.
-pub fn omarchy_colors_path() -> PathBuf {
-    home().join(".local/state/omarchy/current/theme/colors.toml")
-}
-
 impl Dial {
-    /// Copy with any "theme" colours replaced by the current Omarchy theme's,
-    /// falling back to a neutral dark palette if no theme is found.
+    /// Copy with any "theme" colours replaced by the desktop's (Omarchy theme,
+    /// Windows accent), falling back to a neutral dark palette; "default" font
+    /// replaced by the platform's.
     pub fn resolved(&self) -> Dial {
-        let theme: Option<toml::Table> = std::fs::read_to_string(omarchy_colors_path())
-            .ok()
-            .and_then(|t| t.parse().ok());
+        let theme = crate::platform::theme_palette();
         Dial {
             accent: resolve(&self.accent, theme.as_ref(), "accent", "#7aa2f7"),
             background: resolve(&self.background, theme.as_ref(), "background", "#16161e"),
@@ -429,6 +519,11 @@ impl Dial {
             selected_text: resolve(&self.selected_text, theme.as_ref(), "background", "#16161e"),
             center_color: resolve(&self.center_color, theme.as_ref(), "background", "#16161e"),
             border: resolve(&self.border, theme.as_ref(), "accent", "#7aa2f7"),
+            font: if self.font.eq_ignore_ascii_case("default") {
+                crate::platform::default_font().to_string()
+            } else {
+                self.font.clone()
+            },
             opacity: self.opacity.clamp(0.0, 1.0),
             center_image_opacity: self.center_image_opacity.clamp(0.0, 1.0),
             center_size: self.center_size.clamp(0.1, 0.6),
@@ -579,16 +674,43 @@ pub fn save_settings_to_file(
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
+/// Set `[trigger] device`, keeping the rest of the file as it is.
+pub fn set_device(text: &str, device: &str) -> Result<String, String> {
+    use toml_edit::{value, DocumentMut, Item, Table};
+    let mut doc: DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
+    let t = doc
+        .entry("trigger")
+        .or_insert(Item::Table(Table::new()))
+        .as_table_mut()
+        .ok_or("[trigger] is not a table")?;
+    t.insert("device", value(device));
+    let out = doc.to_string();
+    Config::parse(&out)?;
+    Ok(out)
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn set_device_in_file(device: &str) -> Result<(), String> {
+    Config::load()?; // creates the file if needed
+    let path = Config::path();
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let out = set_device(&text, device)?;
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, out).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
 pub fn mtime() -> Option<SystemTime> {
     std::fs::metadata(Config::path()).and_then(|m| m.modified()).ok()
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var).map(PathBuf::from).unwrap_or_default()
 }
 
 fn expand_tilde(s: &str) -> PathBuf {
-    match s.strip_prefix("~/") {
+    match s.strip_prefix("~/").or_else(|| s.strip_prefix("~\\")) {
         Some(rest) => home().join(rest),
         None => PathBuf::from(s),
     }
@@ -708,6 +830,26 @@ mod tests {
             .unwrap();
         assert!(remove_items(DEFAULT_CONFIG, &[(settings, "Settings".into())]).is_err());
         assert_eq!(remove_items(DEFAULT_CONFIG, &[]).unwrap(), DEFAULT_CONFIG);
+    }
+
+    #[test]
+    fn every_platform_default_parses() {
+        for items in [OMARCHY_ITEMS, LINUX_ITEMS, WINDOWS_ITEMS] {
+            let c = Config::parse(&format!("{}{}", settings_text!(), items)).unwrap();
+            assert!(c.items.iter().any(|i| i.action == Some(Builtin::Settings)));
+            assert_eq!(c.dial.font, "default");
+        }
+        let linux = Config::parse(&format!("{}{}", settings_text!(), LINUX_ITEMS)).unwrap();
+        let browser = linux.items.iter().find(|i| i.label == "Browser").unwrap();
+        assert!(browser.command.as_deref().unwrap().contains(r#"gtk-launch "$b""#));
+    }
+
+    #[test]
+    fn set_device_writes_windows_paths_safely() {
+        let dev = r"\\?\ACPI#LEN0312#4&2f3c&0#{378de44c-56ef-11d1-bc8c-00a0c91405dd}";
+        let out = set_device(DEFAULT_CONFIG, dev).unwrap();
+        assert_eq!(Config::parse(&out).unwrap().trigger.device, dev);
+        assert!(out.contains("# tp-dial config"));
     }
 
     #[test]

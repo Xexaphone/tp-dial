@@ -6,7 +6,7 @@
 //! an overlay-layer surface. Hyprland floats + centres it via a window rule.
 
 use crate::config::{self, rgba, Animation, Config, Dial, TriggerMode};
-use crate::overlay::{self, View, PAD};
+use crate::dial::{self, View, PAD};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib, pango};
 use gtk4 as gtk;
@@ -35,11 +35,7 @@ impl State {
 }
 
 fn describe(it: &config::Item) -> String {
-    match it.launch() {
-        config::Launch::Shell(s) => s,
-        config::Launch::Exec(p) => p.display().to_string(),
-        config::Launch::Builtin(b) => format!("built-in: {b:?}"),
-    }
+    it.launch().to_string()
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -122,7 +118,7 @@ pub fn open(app: &gtk::Application) {
             let Some(d) = &v.dial else { return };
             let k = (w.min(h) as f64 / (d.size + 2.0 * PAD)).min(1.0);
             cr.scale(k, k);
-            overlay::draw(&v, cr, w as f64 / k, h as f64 / k);
+            dial::draw(&v, cr, w as f64 / k, h as f64 / k);
         });
     }
     let refresh: Refresh = {
@@ -133,7 +129,7 @@ pub fn open(app: &gtk::Application) {
                 (s.dial.resolved(), s.visible_labels())
             };
             let mut v = view.borrow_mut();
-            v.image = overlay::load_image(v.image.take(), &d.center_image);
+            v.image = dial::load_image(v.image.take(), &d.center_image);
             v.selected = (!labels.is_empty()).then_some(1.min(labels.len() - 1));
             v.labels = labels;
             v.dial = Some(d);
@@ -558,15 +554,18 @@ fn colour_picker(
     (dd, btn)
 }
 
-/// [Omarchy font | Custom] dropdown + font family button.
+/// [Default font | Custom] dropdown + font family button. "default" is the
+/// platform's font (monospace / Omarchy's font on Linux, Segoe UI on Windows).
 fn font_picker(state: &Shared, refresh: &Refresh) -> (gtk::DropDown, gtk::FontDialogButton) {
-    let dd = gtk::DropDown::from_strings(&["Omarchy font", "Custom"]);
+    let dd = gtk::DropDown::from_strings(&["Default font", "Custom"]);
     let btn = gtk::FontDialogButton::new(Some(gtk::FontDialog::new()));
     btn.set_level(gtk::FontLevel::Family);
     let current = state.borrow().dial.font.clone();
-    let custom = current != "monospace";
+    let is_default = |f: &str| f.eq_ignore_ascii_case("default") || f == "monospace";
+    let custom = !is_default(&current);
     dd.set_selected(custom as u32);
-    btn.set_font_desc(&pango::FontDescription::from_string(&current));
+    let shown = if custom { current.clone() } else { crate::platform::default_font().to_string() };
+    btn.set_font_desc(&pango::FontDescription::from_string(&shown));
     btn.set_sensitive(custom);
     let family = |b: &gtk::FontDialogButton| {
         b.font_desc().and_then(|f| f.family()).map(|f| f.to_string()).unwrap_or_else(|| "monospace".into())
@@ -576,7 +575,7 @@ fn font_picker(state: &Shared, refresh: &Refresh) -> (gtk::DropDown, gtk::FontDi
         dd.connect_selected_notify(move |dd| {
             let custom = dd.selected() == 1;
             btn.set_sensitive(custom);
-            state.borrow_mut().dial.font = if custom { family(&btn) } else { "monospace".into() };
+            state.borrow_mut().dial.font = if custom { family(&btn) } else { "default".into() };
             refresh();
         });
     }

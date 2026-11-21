@@ -5,14 +5,19 @@ edition = "2024"
 
 [dependencies]
 async-channel = "2.5.0"
-evdev = "0.13.2"
 gtk4 = { version = "0.11.5", features = ["v4_12"] }
-gtk4-layer-shell = "0.8.1"
-libc = "0.2.191"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
 toml = "1.2.1"
 toml_edit = "0.25.19"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13.2"
+gtk4-layer-shell = "0.8.1"
+libc = "0.2.191"
+serde_json = "1.0.154"
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_HiDpi", "Win32_System_Registry", "Win32_System_Console", "Win32_System_Threading", "Win32_System_SystemInformation"] }
 
 [profile.release]
 # A panic anywhere must kill the process so the kernel releases the TrackPoint grab.

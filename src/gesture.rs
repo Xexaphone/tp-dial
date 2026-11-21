@@ -91,6 +91,12 @@ impl Engine {
         self.phase == Phase::Open
     }
 
+    /// A TrackPoint button is down (dragging / middle-button scrolling).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn buttons_held(&self) -> bool {
+        !self.held.is_empty()
+    }
+
     pub fn motion(&mut self, t: Instant, dx: i32, dy: i32) -> Vec<Action> {
         let mut out = Vec::new();
         let new_burst = self

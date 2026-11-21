@@ -1,14 +1,23 @@
 //! "Add item" form, opened from the dial's built-in `action = "add-item"` slice.
-//! A centred layer-shell surface with exclusive keyboard focus, so it floats
-//! above everything without needing Hyprland window rules.
+//! Linux: a centred layer-shell surface with exclusive keyboard focus, so it
+//! floats above everything without compositor rules. Windows: a normal window.
 
 use crate::config::{self, rgba, Config, Kind};
 use gtk::prelude::*;
 use gtk4 as gtk;
+#[cfg(target_os = "linux")]
 use gtk4_layer_shell::{KeyboardMode, Layer, LayerShell};
 
+/// Linux lists installed apps (.desktop files) to pick from; Windows takes a
+/// program name / path / URI typed in.
+const APP_PICKER: bool = cfg!(target_os = "linux");
+
 const KINDS: [(&str, Kind, &str, &str); 3] = [
-    ("App", Kind::App, "", "Pick one of your installed apps (type to search)."),
+    if APP_PICKER {
+        ("App", Kind::App, "", "Pick one of your installed apps (type to search).")
+    } else {
+        ("App", Kind::App, "e.g. notepad, C:\\Tools\\app.exe or ms-settings:", "A program name, path, or URI (started with `start`).")
+    },
     ("Script", Kind::Script, "e.g. ~/bin/backup.sh", "Path to an executable file."),
     ("Command", Kind::Command, "e.g. wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle", "Any shell command line."),
 ];
@@ -57,12 +66,17 @@ pub fn open(app: &gtk::Application) {
     );
 
     let win = gtk::ApplicationWindow::new(app);
-    win.add_css_class("tp-dial-transparent"); // only the rounded .tp-form box is drawn
-    win.init_layer_shell();
-    win.set_layer(Layer::Overlay);
-    win.set_keyboard_mode(KeyboardMode::Exclusive);
-    win.set_namespace(Some("tp-dial-form"));
     win.set_default_size(460, -1);
+    #[cfg(target_os = "linux")]
+    {
+        win.add_css_class("tp-dial-transparent"); // only the rounded .tp-form box is drawn
+        win.init_layer_shell();
+        win.set_layer(Layer::Overlay);
+        win.set_keyboard_mode(KeyboardMode::Exclusive);
+        win.set_namespace(Some("tp-dial-form"));
+    }
+    #[cfg(not(target_os = "linux"))]
+    win.set_title(Some("Add dial item"));
 
     let root = gtk::Box::new(gtk::Orientation::Vertical, 10);
     root.add_css_class("tp-form");
@@ -126,7 +140,7 @@ pub fn open(app: &gtk::Application) {
         let (value, app_dd, hint) = (value.clone(), app_dd.clone(), hint.clone());
         move |dd: &gtk::DropDown| {
             let k = &KINDS[dd.selected() as usize];
-            let is_app = k.1 == Kind::App;
+            let is_app = k.1 == Kind::App && APP_PICKER;
             value.set_visible(!is_app);
             app_dd.set_visible(is_app);
             value.set_placeholder_text(Some(k.2));
@@ -171,7 +185,7 @@ pub fn open(app: &gtk::Application) {
         let (app_dd, apps) = (app_dd.clone(), apps.clone());
         move || {
             let k = KINDS[kind.selected() as usize].1;
-            let v = if k == Kind::App {
+            let v = if k == Kind::App && APP_PICKER {
                 match (app_dd.selected() as usize).checked_sub(1).and_then(|i| apps.get(i)) {
                     Some((_, id)) => id.clone(),
                     None => return error.set_text("Pick an app from the list."),
