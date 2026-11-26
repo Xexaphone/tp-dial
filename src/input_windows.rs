@@ -267,10 +267,9 @@ fn run_actions(st: &mut State, actions: Vec<Action>) {
     for a in actions {
         let _ = st.session.handle(&mut st.engine, a);
     }
-    if st.engine.phase == Phase::Open {
-        // Re-read in case a config reload changed the mode.
-        st.any_mode = st.session.cfg.trigger.mode == TriggerMode::Any;
-    }
+    // Re-read every time: a config reload (e.g. switching to "flick" in Settings)
+    // happens inside session.handle, and the hook must follow it straight away.
+    st.any_mode = st.session.cfg.trigger.mode == TriggerMode::Any;
     update_flags_for(st);
     match st.engine.deadline() {
         Some(d) => {

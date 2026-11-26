@@ -89,13 +89,34 @@ pub fn open(app: &gtk::Application) {
         let (state, win_css) = (state.clone(), win_css.clone());
         Rc::new(move || {
             let s = state.borrow();
-            let (r, g, b, _) = rgba(&s.dial.resolved().background);
+            let d = s.dial.resolved();
+            let (r, g, b, _) = rgba(&d.background);
+            let (fr, fg, fb, _) = rgba(&d.foreground);
+            // Match GTK's own widget styling (entries, dropdowns, buttons) to the
+            // background, or e.g. on Windows its default light theme puts dark grey
+            // text on a dark window.
+            let dark = 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5;
+            if let Some(settings) = gtk::Settings::default() {
+                // GTK 4.20+ has gtk-interface-color-scheme; older GTK only the prefer-dark flag.
+                let scheme = settings
+                    .find_property("gtk-interface-color-scheme")
+                    .and_then(|p| glib::EnumClass::with_type(p.value_type()))
+                    .and_then(|c| c.to_value_by_nick(if dark { "dark" } else { "light" }));
+                match scheme {
+                    Some(v) => settings.set_property_from_value("gtk-interface-color-scheme", &v),
+                    None => settings.set_gtk_application_prefer_dark_theme(dark),
+                }
+            }
+            let rgb = |r: f64, g: f64, b: f64| format!("{}, {}, {}", (r * 255.0).round(), (g * 255.0).round(), (b * 255.0).round());
             win_css.load_from_string(&format!(
-                "window.tp-settings, window.tp-settings.background {{ background-color: rgba({}, {}, {}, {:.2}); }}",
-                (r * 255.0).round(),
-                (g * 255.0).round(),
-                (b * 255.0).round(),
+                "window.tp-settings, window.tp-settings.background {{ background-color: rgba({}, {:.2}); color: rgb({}); }}
+                 window.tp-settings label {{ color: rgb({}); }}
+                 window.tp-settings label.dim-label {{ color: rgba({}, 0.7); }}",
+                rgb(r, g, b),
                 s.window_opacity.clamp(0.2, 1.0),
+                rgb(fr, fg, fb),
+                rgb(fr, fg, fb),
+                rgb(fr, fg, fb),
             ));
         })
     };
