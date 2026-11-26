@@ -118,7 +118,9 @@ fn choose_device(wanted: Option<&str>) -> Result<(HANDLE, String), String> {
             return Ok(d.clone());
         }
     }
-    Err("couldn't identify the TrackPoint automatically; run `tp-dial --find-device` and push it".into())
+    Err("tp-dial couldn't identify the TrackPoint automatically.\n\nRun \"Find my TrackPoint\" from the Start Menu \
+         (or `tp-dial --find-device`) and push the TrackPoint when asked."
+        .into())
 }
 
 pub fn start(opts: &Opts, session: Session) -> Result<(), String> {
@@ -388,7 +390,10 @@ pub fn find_device() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         let rid = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
         RegisterRawInputDevices(&[rid], size_of::<RAWINPUTDEVICE>() as u32).map_err(|e| e.to_string())?;
-        println!("Push the TrackPoint around for the next 6 seconds (don't touch the touchpad or mouse)...");
+        crate::platform::tell(
+            "Let's find your TrackPoint.\n\nAfter you click OK, push the TrackPoint around for 6 seconds. \
+             Don't touch the touchpad or mouse meanwhile.",
+        );
         SetTimer(Some(hwnd), 1, 6000, None);
         message_loop();
     }
@@ -402,8 +407,10 @@ pub fn find_device() -> Result<(), String> {
         .find(|(h, _)| h.0 as isize == handle)
         .map(|(_, n)| n)
         .ok_or("that device disappeared")?;
-    println!("TrackPoint: {name}  (moved {amount} counts)");
     crate::config::set_device_in_file(&name)?;
-    println!("Saved as `device` under [trigger] in {}", crate::config::Config::path().display());
+    crate::platform::tell(&format!(
+        "Found it, and saved it to the settings.\n\n{name}\n(moved {amount} counts)\n\nIf the dial doesn't respond, run \
+         \"Find my TrackPoint\" again from the Start Menu."
+    ));
     Ok(())
 }

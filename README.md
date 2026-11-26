@@ -58,35 +58,37 @@ Re-run `./install.sh` after changing the code. Config changes don't need it.
 
 ## Windows
 
-The same app, with Windows-specific input and overlay:
+### Install
+
+1. Download **`tp-dial-setup.exe`** from the [latest release](https://github.com/Xexaphone/tp-dial/releases/latest).
+2. Run it. It installs for your user only, so there's no administrator prompt.
+3. At the end, leave **Find my TrackPoint now** ticked and push the TrackPoint when asked. That's how tp-dial knows which device it is.
+
+That's it: tp-dial starts straight away, and (if you kept the option ticked) whenever you sign in. The Start Menu gets **tp-dial**, **tp-dial Settings** and **Find my TrackPoint**. Uninstall it from *Settings → Apps* like any other app; your config in `%APPDATA%\tp-dial` is kept.
+
+Windows may warn that the installer is from an unknown publisher, because it isn't code-signed. Choose *More info → Run anyway*.
+
+Prefer no installer? The release also has **`tp-dial-windows-portable.zip`**: unzip it anywhere and run `bin\tp-dial.exe`. Run `bin\tp-dial.exe --find-device` once, and `--install-autostart` if you want it at sign-in.
+
+### How it works on Windows
 
 - **Input:** Raw Input identifies the TrackPoint's own movement. A low-level mouse hook stops it moving the cursor, but Windows doesn't tell the hook which device moved, so this is best effort: the first report of a push can still nudge the cursor slightly. Your touchpad and mouse are unaffected.
 - **Overlay:** a topmost, click-through layered window, drawn with the same renderer as Linux and scaled for the monitor's DPI.
 - **Items:** `app` items go through `start` (program names, paths, or URIs like `ms-settings:`), `command` items through `cmd`, and `.ps1` scripts through PowerShell.
 - **Theme:** `"theme"` colours follow your Windows accent colour and light/dark mode.
 
-### Build (on Windows, with MSYS2)
+### Build from source
+
+Only needed if you're changing the code.
 
 1. Install [MSYS2](https://www.msys2.org/), open the **UCRT64** shell and run:
    ```sh
-   pacman -S mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-gcc
+   pacman -S mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-gtk4
    ```
-2. Install Rust with the GNU toolchain: `rustup default stable-x86_64-pc-windows-gnu`.
-3. With `C:\msys64\ucrt64\bin` on your `PATH`, run `cargo build --release` in this folder.
+2. In that shell, run `cargo build --release` in this folder.
+3. To make a self-contained folder like the release's, run `packaging/windows/bundle.sh` (output in `dist/tp-dial`).
 
-`tp-dial.exe` needs the GTK DLLs from `C:\msys64\ucrt64\bin` at run time (keep that folder on `PATH`, or copy the DLLs next to the exe).
-
-### First run
-
-```sh
-tp-dial --find-device         # push the TrackPoint for 6 seconds; saves which device it is
-tp-dial --debug               # try it, with live output
-tp-dial --install-autostart   # start at sign-in (--remove-autostart to undo)
-```
-
-No administrator rights are needed. The config lives in `%APPDATA%\tp-dial\config.toml`.
-
-To check the Windows code compiles from Linux (no linking, no Windows GTK needed): `./scripts/check-windows.sh`.
+GitHub builds, checks and packages every push to `master` / `cross-platform` (see *Actions*); pushing a tag like `v0.2.0` publishes a release. To check the Windows code compiles from Linux (no linking, no Windows GTK needed): `./scripts/check-windows.sh`.
 
 ## Using it
 

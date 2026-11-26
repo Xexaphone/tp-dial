@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use windows::core::HSTRING;
 use windows::Win32::Foundation::{ERROR_SUCCESS, POINT};
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+use windows::Win32::System::Console::{AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_OUTPUT_HANDLE};
 use windows::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD,
 };
@@ -17,7 +17,9 @@ use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 use windows::Win32::UI::HiDpi::{
     GetDpiForMonitor, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, MessageBoxW, SetCursorPos, MB_ICONERROR, MB_OK};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, MessageBoxW, SetCursorPos, MB_ICONERROR, MB_ICONINFORMATION, MB_OK,
+};
 
 /// Where the overlay should appear, in physical screen pixels.
 #[derive(Clone, Debug, Default)]
@@ -36,7 +38,11 @@ static HAS_CONSOLE: AtomicBool = AtomicBool::new(false);
 pub fn init() {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        HAS_CONSOLE.store(AttachConsole(ATTACH_PARENT_PROCESS).is_ok(), Ordering::Relaxed);
+        // Output goes somewhere if we're in a console, or if the parent redirected
+        // our output (a pipe / file, e.g. a script or CI) - then never pop dialogs.
+        let attached = AttachConsole(ATTACH_PARENT_PROCESS).is_ok();
+        let redirected = GetStdHandle(STD_OUTPUT_HANDLE).is_ok_and(|h| !h.is_invalid() && !h.0.is_null());
+        HAS_CONSOLE.store(attached || redirected, Ordering::Relaxed);
     }
 }
 
@@ -45,6 +51,19 @@ pub fn report_error(msg: &str) {
     if !HAS_CONSOLE.load(Ordering::Relaxed) {
         unsafe {
             MessageBoxW(None, &HSTRING::from(msg), &HSTRING::from("tp-dial"), MB_OK | MB_ICONERROR);
+        }
+    }
+}
+
+/// Tell the user something: the console if we were run from one, else a dialog
+/// (Start Menu shortcuts and the installer have no console). Blocks until the
+/// dialog is closed.
+pub fn tell(msg: &str) {
+    if HAS_CONSOLE.load(Ordering::Relaxed) {
+        println!("{msg}");
+    } else {
+        unsafe {
+            MessageBoxW(None, &HSTRING::from(msg), &HSTRING::from("tp-dial"), MB_OK | MB_ICONINFORMATION);
         }
     }
 }
@@ -186,6 +205,6 @@ pub fn set_autostart(on: bool) -> Result<(), String> {
     if r != ERROR_SUCCESS {
         return Err(format!("registry update failed ({r:?})"));
     }
-    println!("{}", if on { "tp-dial will start when you sign in." } else { "tp-dial autostart removed." });
+    tell(if on { "tp-dial will start when you sign in." } else { "tp-dial will no longer start when you sign in." });
     Ok(())
 }

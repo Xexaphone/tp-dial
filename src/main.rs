@@ -114,6 +114,22 @@ fn main() -> ExitCode {
             "--install-autostart" => return to_exit(platform::set_autostart(true)),
             #[cfg(windows)]
             "--remove-autostart" => return to_exit(platform::set_autostart(false)),
+            // Hidden: load an image through gdk-pixbuf and report it. Used by the
+            // Windows build to check the bundled image loaders work.
+            "--probe-image" => {
+                use gtk4::gdk_pixbuf::prelude::*;
+                let path = args.next().unwrap_or_default();
+                return match gtk4::gdk_pixbuf::PixbufAnimation::from_file(&path) {
+                    Ok(a) => {
+                        println!("ok {}x{} {path}", a.width(), a.height());
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("cannot load {path}: {e}");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
             "-h" | "--help" => {
                 println!("{HELP}");
                 return ExitCode::SUCCESS;

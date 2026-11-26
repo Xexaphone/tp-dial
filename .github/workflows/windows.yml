@@ -1,0 +1,101 @@
+# Builds tp-dial for Windows on a real Windows machine, bundles the GTK runtime,
+# packages an installer, and checks all three actually work. On a v* tag it also
+# publishes them as a GitHub Release.
+name: Windows build
+
+on:
+  push:
+    branches: [master, cross-platform]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # only used to publish releases on tags
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            zip
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Unit tests
+        run: cargo test --release --locked
+
+      - name: Bundle the GTK runtime
+        run: packaging/windows/bundle.sh
+
+      # Run the bundled exe with only Windows' own folders on PATH, so a DLL
+      # missing from the bundle fails here rather than on someone's machine.
+      - name: Check the bundle runs on its own
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $exe = "dist\tp-dial\bin\tp-dial.exe"
+          # tp-dial is a GUI-subsystem exe: piping makes PowerShell wait for it.
+          & $exe --check | Out-Host; if ($LASTEXITCODE) { throw "tp-dial --check failed" }
+          & $exe --probe-image packaging\windows\tp-dial.png | Out-Host; if ($LASTEXITCODE) { throw "image loaders not working" }
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like "refs/tags/v*") { $v = $env:GITHUB_REF_NAME.Substring(1) }
+          else { $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value }
+          "value=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.value }}" packaging\windows\tp-dial.iss
+          if ($LASTEXITCODE) { throw "installer build failed" }
+
+      - name: Check the installer installs, runs and uninstalls
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\tp-dial-setup.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER" -Wait -PassThru
+          if ($p.ExitCode) { throw "setup exited $($p.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\tp-dial"
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & "$app\bin\tp-dial.exe" --check | Out-Host; if ($LASTEXITCODE) { throw "installed tp-dial --check failed" }
+          $p = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -PassThru
+          if ($p.ExitCode) { throw "uninstall exited $($p.ExitCode)" }
+          Start-Sleep -Seconds 2
+          if (Test-Path "$app\bin\tp-dial.exe") { throw "uninstall left the program behind" }
+
+      - name: Portable zip
+        run: cd dist && zip -qr tp-dial-windows-portable.zip tp-dial
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tp-dial-windows-${{ steps.version.outputs.value }}
+          path: |
+            dist/tp-dial-setup.exe
+            dist/tp-dial-windows-portable.zip
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME dist\tp-dial-setup.exe dist\tp-dial-windows-portable.zip --title "tp-dial $env:GITHUB_REF_NAME" --generate-notes
