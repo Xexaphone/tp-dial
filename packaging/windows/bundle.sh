@@ -28,11 +28,25 @@ pixbuf=lib/gdk-pixbuf-2.0/2.10.0
 mkdir -p "$out/$pixbuf"
 cp -r "$prefix/$pixbuf/loaders" "$out/$pixbuf/"
 for loader in "$out/$pixbuf"/loaders/*.dll; do copy_deps "$loader"; done
-# Write the cache with loader paths relative to the install folder (passing the
-# loaders as relative paths makes query-loaders record them that way), so it
-# works wherever tp-dial is installed.
-(cd "$out" && "$prefix/bin/gdk-pixbuf-query-loaders.exe" "$pixbuf"/loaders/*.dll > "$pixbuf/loaders.cache")
-grep -q "$(cygpath -m "$PWD" | cut -c1-3)" "$out/$pixbuf/loaders.cache" && { echo "loaders.cache has absolute paths" >&2; exit 1; } || true
+# The loader index (loaders.cache) has to name each loader by absolute path, and
+# query-loaders writes this build machine's folder. Ship it as a template with
+# that folder replaced by @TPDIAL_ROOT@; tp-dial fills in its real install folder
+# at startup (platform::win::init) and points GDK_PIXBUF_MODULE_FILE at the result.
+raw=$(cd "$out" && "$prefix/bin/gdk-pixbuf-query-loaders.exe" "$pixbuf"/loaders/*.dll)
+root_m=$(cygpath -m "$PWD/$out")          # D:/a/.../dist/tp-dial
+root_w=$(cygpath -w "$PWD/$out")          # D:\a\...\dist\tp-dial
+root_w2=${root_w//\\/\\\\}                # backslashes doubled, as in the cache's strings
+for root in "$root_m" "$root_w2" "$root_w"; do
+  lower="${root,}"                        # query-loaders may lower-case the drive letter
+  raw=${raw//"$root"/@TPDIAL_ROOT@}
+  raw=${raw//"$lower"/@TPDIAL_ROOT@}
+done
+printf '%s\n' "$raw" > "$out/$pixbuf/loaders.cache.in"
+echo "--- loaders.cache.in (first entries):"; grep -m4 '^"' "$out/$pixbuf/loaders.cache.in" || true
+if grep -qiE '"[a-z]:[/\\]' "$out/$pixbuf/loaders.cache.in"; then
+  echo "loaders.cache.in still has absolute paths" >&2; exit 1
+fi
+grep -q '@TPDIAL_ROOT@' "$out/$pixbuf/loaders.cache.in" || { echo "no loaders found" >&2; exit 1; }
 
 # GSettings schemas (compiled).
 mkdir -p "$out/share/glib-2.0/schemas"

@@ -33,9 +33,11 @@ pub struct Placement {
 
 static HAS_CONSOLE: AtomicBool = AtomicBool::new(false);
 
-/// Per-monitor DPI awareness (so sizes and cursor coordinates are real pixels), and
-/// reuse the console we were started from, if any, for CLI output.
+/// Per-monitor DPI awareness (so sizes and cursor coordinates are real pixels),
+/// reuse the console we were started from, if any, for CLI output, and point
+/// gdk-pixbuf at the bundled image loaders. Called first thing in main.
 pub fn init() {
+    setup_image_loaders();
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         // Output goes somewhere if we're in a console, or if the parent redirected
@@ -44,6 +46,36 @@ pub fn init() {
         let redirected = GetStdHandle(STD_OUTPUT_HANDLE).is_ok_and(|h| !h.is_invalid() && !h.0.is_null());
         HAS_CONSOLE.store(attached || redirected, Ordering::Relaxed);
     }
+}
+
+/// The installer / portable zip ship gdk-pixbuf's loader index as a template
+/// (lib/gdk-pixbuf-2.0/2.10.0/loaders.cache.in) with @TPDIAL_ROOT@ where the
+/// install folder goes, because the index must hold absolute paths. Fill it in
+/// for wherever we're installed, keep it in %LOCALAPPDATA%\tp-dial, and tell
+/// gdk-pixbuf to use it. Does nothing for a non-bundled build (e.g. in MSYS2).
+fn setup_image_loaders() {
+    if std::env::var_os("GDK_PIXBUF_MODULE_FILE").is_some() {
+        return;
+    }
+    let Some(root) = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.to_path_buf())) else {
+        return;
+    };
+    let Ok(template) = std::fs::read_to_string(root.join(r"lib\gdk-pixbuf-2.0\2.10.0\loaders.cache.in")) else {
+        return;
+    };
+    // Forward slashes: valid on Windows and need no escaping in the index's strings.
+    let cache = template.replace("@TPDIAL_ROOT@", &root.to_string_lossy().replace('\\', "/"));
+    let Some(dir) = std::env::var_os("LOCALAPPDATA").map(|d| std::path::PathBuf::from(d).join("tp-dial")) else {
+        return;
+    };
+    let path = dir.join("loaders.cache");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(cache.as_str()) {
+        if std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &cache)).is_err() {
+            return;
+        }
+    }
+    // SAFETY: called from init(), first thing in main, before any other thread.
+    unsafe { std::env::set_var("GDK_PIXBUF_MODULE_FILE", &path) };
 }
 
 /// Started without a console (autostart, double-click): show errors in a dialog.
